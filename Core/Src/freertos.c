@@ -45,7 +45,8 @@ typedef enum {
 
 	NORMAL_MODE,
 	ON_FLIGHT,
-	BURNOUT_DETECT
+	APOGEE_DETECTED,
+	FALLING
 
 
 }FlightState;
@@ -57,6 +58,7 @@ typedef enum {
 
 // incomingData'nın adresine 36 byte veri gelince haber ver ve sürekli doldur
 HAL_UART_Receive_DMA(&huart2, (uint8_t*)&incomingData, 36);
+
 
 
 
@@ -104,7 +106,7 @@ void checkSut_Data(){
 	    }
 
 
-	    if(calculatedSum == incomingData.data ){
+	    if(calculatedSum == incomingData.checksum ){
 
 	    	currentData = incomingData.data ;
 
@@ -140,11 +142,22 @@ extern double gForce;
 extern double irtifa;
 extern FlightState currentState;
 
+
+double maxIrtifa=0.00;
+double maxgForce=0.00;
+
+
+float sonIrtifa = 0.0f;
+uint32_t sonZaman=0;
+float dikeyHiz = 0.0f;
+
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define yerCekimiIvmesi = 9.81;
+#define YER_CEKIMI_IVMESI 9.81;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -267,6 +280,7 @@ void readSensor(void const * argument)
 
 
 
+	  checkSut_Data();
 
 	  if (osMutexWait(myMutex01Handle, osWaitForever) == osOK) {
 
@@ -280,7 +294,7 @@ void readSensor(void const * argument)
 		  		rollFinal= mpuSensor.KalmanAngleX + rollOffset;
 		  	    pitchFinal= mpuSensor.KalmanAngleY + pitchOffset;
             //   gForce = mpuSensor.Az;      önceden böyleydi ama artık sahte veriyi çekeceğiz.
-		  	    gForce = currentData.ivmeZ / yerCekimiIvmesi;
+		  	    gForce = currentData.ivmeZ / YER_CEKIMI_IVMESI;
 
 
 
@@ -292,13 +306,35 @@ void readSensor(void const * argument)
 
 //maksimum irtifayı alacağız ve sonrasında normal irtifadan düşecekse
 
-		  double maxIrtifa=0.00;
 
 		  if(irtifa>maxIrtifa){
 			  maxIrtifa=irtifa;
 		  }
 
+		  if(gForce>maxgForce){
+				  maxgForce=gForce;
+			  }
 
+
+
+
+
+		  //dikey hiz
+
+		  uint32_t simdikiZaman= HAL_GetTick();
+
+		  uint32_t deltaT =(simdikiZaman-sonZaman)/1000.0f;
+
+		  if(deltaT>0){
+
+			  dikeyHiz = (irtifa-sonIrtifa)/deltaT;
+
+			  sonIrtifa = irtifa;
+			  sonZaman= simdikiZaman;
+
+		  }
+
+		  //dikey hiz
 
 
 
@@ -333,12 +369,18 @@ void readSensor(void const * argument)
 
 	//kalkıştan sonraki G kuvveti değişimlerini kontrol edeceğiz
 
+             if (maxgForce>(gForce + 2.0f)){
+            	  char *msg = "BURNOUT DETECTED\r\n";
+                 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
+             }
 
-			  if(irtifa){
 
-				  char *msg = "BURNOUT ALGILANDI\r\n";
+
+			  if(maxIrtifa>(irtifa +2.0f) && irtifa > 20.0f ){
+
+				  char *msg = "APOGEE DETECTED\r\n";
 				              HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
-			  		  	  currentState = BURNOUT_DETECT;
+			  		  	  currentState = APOGEE_DETECTED;
 
 			  		  	}
 
@@ -347,10 +389,24 @@ void readSensor(void const * argument)
 
 
 
-		  case BURNOUT_DETECT:
 
 
-		        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+		  case APOGEE_DETECTED:
+
+		        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);//sürüklenme paraşütü açıldı say
+
+
+		        currentState = FALLING;
+			  break;
+
+
+
+		  case FALLING:
+
+            if(irtifa<500){
+
+		        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);//ana paraşüt açıldı say
+            }
 
 			  break;
 
