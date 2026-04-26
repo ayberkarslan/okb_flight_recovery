@@ -22,6 +22,7 @@
 #include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
+#include "dma.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -31,6 +32,7 @@
 #include <math.h>
 #include "mpu6050.h"
 #include "usart.h"
+#include<stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,6 +41,9 @@
 
 
 
+void HandleSUTCommand(uint8_t command);
+void sendStatusData(void);
+void checkSut_Data(uint32_t Size);
 
 
 typedef enum {
@@ -57,7 +62,7 @@ typedef enum {
 
 
 // incomingData'nın adresine 36 byte veri gelince haber ver ve sürekli doldur
-HAL_UART_Receive_DMA(&huart2, (uint8_t*)&incomingData, 36);
+//HAL_UART_Receive_DMA(&huart2, (uint8_t*)&incomingData, 36);
 
 
 
@@ -87,33 +92,47 @@ typedef struct __attribute__((packed)) {
 
 sutData incomingData;
 flightData currentData;
+uint8_t calculatedSum;
 
 
 
-void checkSut_Data(){
-	if(incomingData.header != 0XAB || incomingData.footer1 != 0x0D || incomingData.footer2 != 0x0A){
+void checkSut_Data(uint32_t Size){
+
+
+
+	uint8_t *ptr = (uint8_t*)&incomingData;
+
+	    // 1. Header ve Boyut Kontrolü
+	    if (ptr[0] == 0xAA && Size == 5) {
+	        // BU BİR KOMUT PAKETİDİR
+	        if (ptr[3] == 0x0D && ptr[4] == 0x0A) { // Footer Kontrolü
+	            uint8_t check = ptr[0] + ptr[1] + ptr[2]; // Komut Checksum
+	            if (check == ptr[2]) { // Dokümana göre checksum 3. byte ise
+	                HandleSUTCommand(ptr[1]); // Örn: 0x22 ise SUT başlat
+	            }
+	        }
+	    }
+/*
+ * if(incomingData.header != 0XAB || incomingData.footer1 != 0x0D || incomingData.footer2 != 0x0A){
 		return;
 
 
 	}
-
-
-	uint8_t calculatedSum = 0;
+ */
+	    else if (ptr[0] == 0xAB && Size == 36) {
+	calculatedSum = 0;
 	    uint8_t *byte = (uint8_t*)&incomingData;
 
 	    for (int i = 0; i < 33; i++) {
 	        calculatedSum += byte[i]; // o 32 bytelik veri kısmımızı byte byte topluyoruz ve aşağıda kontrol edeceğiz
 	    }
 
-
 	    if(calculatedSum == incomingData.checksum ){
 
 	    	currentData = incomingData.data ;
-
 	    }
-
      sendStatusData();
-
+	    }
 
 }
 
@@ -153,11 +172,15 @@ float dikeyHiz = 0.0f;
 
 
 
+volatile bool sutKomutuGeldi = false;
+volatile bool sutAktif = false;
+uint32_t sutBaslangicZamani = 0;
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define YER_CEKIMI_IVMESI 9.81;
+#define YER_CEKIMI_IVMESI 9.81
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -271,152 +294,94 @@ void StartDefaultTask(void const * argument)
 */
 /* USER CODE END Header_readSensor */
 void readSensor(void const * argument)
-{gForce < 0.20
+{
   /* USER CODE BEGIN readSensor */
   /* Infinite loop */
   for(;;)
   {
-
-
-
-
-	  checkSut_Data();
-
-	  if (osMutexWait(myMutex01Handle, osWaitForever) == osOK) {
-
-
-
-
-		  MPU6050_Read_All(&hi2c1, &mpuSensor);
-
-
-
-		  		rollFinal= mpuSensor.KalmanAngleX + rollOffset;
-		  	    pitchFinal= mpuSensor.KalmanAngleY + pitchOffset;
-            //   gForce = mpuSensor.Az;      önceden böyleydi ama artık sahte veriyi çekeceğiz.
-		  	    gForce = currentData.ivmeZ / YER_CEKIMI_IVMESI;
-
-
-
-		  double currentAz = mpuSensor.Az;
-		  double irtifa = currentData.irtifa;
-		  double angleY = currentData.aciY;
-
-
-
-//maksimum irtifayı alacağız ve sonrasında normal irtifadan düşecekse
-
-
-		  if(irtifa>maxIrtifa){
-			  maxIrtifa=irtifa;
-		  }
-
-		  if(gForce>maxgForce){
-				  maxgForce=gForce;
-			  }
-
-
-
-
-
-		  //dikey hiz
-
-		  uint32_t simdikiZaman= HAL_GetTick();
-
-		  uint32_t deltaT =(simdikiZaman-sonZaman)/1000.0f;
-
-		  if(deltaT>0){
-
-			  dikeyHiz = (irtifa-sonIrtifa)/deltaT;
-
-			  sonIrtifa = irtifa;
-			  sonZaman= simdikiZaman;
-
-		  }
-
-		  //dikey hiz
-
-
-
-		  switch(currentState){
-
-		  case NORMAL_MODE:
-
-		  	if(irtifa>15.00){
-		  		char *msg = "KALKIS ALGILANDI\r\n";
-		  	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
-
-
-		  	  currentState = ON_FLIGHT;
-
-		  	}
-
-
-		  	else{
-		  		//sprintf( serialBuffer2, "ULASILMADI \r\n");
-
-		  			//		HAL_UART_Transmit(&huart2, (uint8_t*)serialBuffer2, strlen(serialBuffer2),2000);
-
-		  					currentState = NORMAL_MODE;
-		  	}
-
-		  	break;
-
-
-
-
-		  case ON_FLIGHT:
-
-	//kalkıştan sonraki G kuvveti değişimlerini kontrol edeceğiz
-
-             if (maxgForce>(gForce + 2.0f)){
-            	  char *msg = "BURNOUT DETECTED\r\n";
-                 HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
-             }
-
-
-
-			  if(maxIrtifa>(irtifa +2.0f) && irtifa > 20.0f ){
-
-				  char *msg = "APOGEE DETECTED\r\n";
-				              HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
-			  		  	  currentState = APOGEE_DETECTED;
-
-			  		  	}
-
-		  	break;
-
-
-
-
-
-
-		  case APOGEE_DETECTED:
-
-		        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);//sürüklenme paraşütü açıldı say
-
-
-		        currentState = FALLING;
-			  break;
-
-
-
-		  case FALLING:
-
-            if(irtifa<500){
-
-		        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);//ana paraşüt açıldı say
-            }
-
-			  break;
-
-
-		  }
-
-		  osMutexRelease(myMutex01Handle);
-	  }
-
-	  osDelay(50);
+      // 1. SUT Komut ve Bekleme Kontrolü
+      if (sutKomutuGeldi && !sutAktif) {
+          if (HAL_GetTick() - sutBaslangicZamani >= 1000) {
+              sutAktif = true;
+          }
+      }
+
+      // 2. TEK BİR MUTEX BAŞLANGICI
+      if (osMutexWait(myMutex01Handle, osWaitForever) == osOK) {
+
+          // 3. KAYNAK SEÇİMİ
+          if (sutAktif) {
+              // SUT AKTİF: currentData üzerinden uçuş algoritması işle
+              gForce = currentData.ivmeZ / 9.81f;
+              irtifa = currentData.irtifa;
+              rollFinal = currentData.aciX; // Örnek olarak
+              pitchFinal = currentData.aciY;
+          } else {
+              // NORMAL MOD: Gerçek sensörü oku
+              MPU6050_Read_All(&hi2c1, &mpuSensor);
+              gForce = mpuSensor.Az;
+              rollFinal = mpuSensor.KalmanAngleX + rollOffset;
+              pitchFinal = mpuSensor.KalmanAngleY + pitchOffset;
+              // irtifa = Gercek_Barometre_Oku(); // MPU6050 irtifa veremez!
+          }
+
+          // 4. ORTAK HESAPLAMALAR (SUT veya Gerçek fark etmez)
+          if(irtifa > maxIrtifa){
+              maxIrtifa = irtifa;
+          }
+          if(gForce > maxgForce){
+              maxgForce = gForce;
+          }
+
+          // Dikey hız
+          uint32_t simdikiZaman = HAL_GetTick();
+          float deltaT = (simdikiZaman - sonZaman) / 1000.0f;
+          if(deltaT > 0.001f){ // Sıfıra bölmeyi engelle
+              dikeyHiz = (irtifa - sonIrtifa) / deltaT;
+              sonIrtifa = irtifa;
+              sonZaman = simdikiZaman;
+          }
+
+          // 5. DURUM MAKİNESİ
+          switch(currentState){
+              case NORMAL_MODE:
+                  if(irtifa > 15.00){
+                      char *msg = "KALKIS ALGILANDI\r\n";
+                      HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
+                      currentState = ON_FLIGHT;
+                  }
+                  break;
+
+              case ON_FLIGHT:
+                  if (maxgForce > (gForce + 2.0f)){
+                      char *msg = "BURNOUT DETECTED\r\n";
+                      HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
+                  }
+                  if(maxIrtifa > (irtifa + 2.0f) && irtifa > 20.0f && dikeyHiz < 0 ){
+                      char *msg = "APOGEE DETECTED\r\n";
+                      HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 50);
+                      currentState = APOGEE_DETECTED;
+                  }
+                  break;
+
+              case APOGEE_DETECTED:
+                  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET); // sürüklenme
+                  currentState = FALLING;
+                  break;
+
+              case FALLING:
+                  if(irtifa < 500){
+                      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET); // ana (pini düzelt)
+                  }
+                  break;
+          }
+
+          // 6. TEK BİR MUTEX ÇIKIŞI
+          osMutexRelease(myMutex01Handle);
+      }
+
+      // 7. DÖNGÜ SONU BEKLEMESİ
+      osDelay(50);
   }
   /* USER CODE END readSensor */
 }
@@ -498,4 +463,52 @@ void serialWrite(void const * argument)
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 
+
+
+void HandleSUTCommand(uint8_t command) {
+    if (command == 0x22) { // SUT BAŞLAT 0x22
+        sutKomutuGeldi = true;
+        sutBaslangicZamani = HAL_GetTick();
+    }
+    else if (command == 0x24) { // DURDUR için 0x24
+        sutKomutuGeldi = false;
+        sutAktif = false;
+        currentState = NORMAL_MODE;
+    }
+}
+
+
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart->Instance == USART2)
+    {
+        // DMA bir paket yakaladı, şimdi analiz etmesi için senin fonksiyonuna yolluyoruz
+        checkSut_Data(Size);
+
+        // Bir sonraki paket için DMA'yı tekrar aktif et
+        HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t*)&incomingData, 64);
+    }
+}
+
+
+
+void sendStatusData(void) {
+    uint8_t statusBuf[6];
+    uint16_t bits = 0;
+
+    if (currentState != NORMAL_MODE) bits |= (1 << 0);
+    if (currentState == FALLING || currentState == APOGEE_DETECTED) bits |= (1 << 4);
+    if (currentState == FALLING) bits |= (1 << 5);
+    if (irtifa < 500.0f && currentState == FALLING) bits |= (1 << 6);
+
+    statusBuf[0] = 0xAA;
+    statusBuf[1] = bits & 0xFF;
+    statusBuf[2] = (bits >> 8) & 0xFF;
+    statusBuf[3] = statusBuf[0] + statusBuf[1] + statusBuf[2];
+    statusBuf[4] = 0x0D;
+    statusBuf[5] = 0x0A;
+
+    HAL_UART_Transmit(&huart2, statusBuf, 6, 10);
+}
 /* USER CODE END Application */

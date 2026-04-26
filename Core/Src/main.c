@@ -47,6 +47,27 @@ typedef enum {
 
 
 }FlightState;
+
+
+typedef struct{
+	float basinc;
+	float irtifa;
+	float ivmeX;
+	float ivmeY;
+	float ivmeZ;
+	float aciX;
+	float aciY;
+	float aciZ;
+}flightData;
+
+
+typedef struct __attribute__((packed)) {
+    uint8_t header;       // 0xAB olmalı
+    flightData data;    // 8 tane float (32 bayt)
+    uint8_t checksum;     // Toplam kontrolü
+    uint8_t footer1;      // 0x0D
+    uint8_t footer2;      // 0x0A
+} sutData;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -63,6 +84,7 @@ typedef enum {
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
 MPU6050_t mpuSensor;
 
 char serialBuffer[100];
@@ -79,6 +101,9 @@ double gForce;
 double irtifa;
 
 FlightState currentState;
+
+extern sutData incomingData;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -138,6 +163,8 @@ currentState= ON_FLIGHT;
     //eğer sensör başlatılamazsa burada sonsuza kadar bekleyeceğiz
   }
 
+
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t*)&incomingData, 64);
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in cmsis_os2.c) */
