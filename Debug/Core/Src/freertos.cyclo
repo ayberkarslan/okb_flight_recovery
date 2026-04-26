@@ -1,0 +1,9 @@
+../Core/Src/freertos.c:99:6:checkSut_Data	10
+../Core/Src/freertos.c:213:6:vApplicationGetIdleTaskMemory	1
+../Core/Src/freertos.c:227:6:MX_FREERTOS_Init	1
+../Core/Src/freertos.c:278:6:StartDefaultTask	1
+../Core/Src/freertos.c:296:6:readSensor	19
+../Core/Src/freertos.c:396:6:serialWrite	2
+../Core/Src/freertos.c:468:6:HandleSUTCommand	3
+../Core/Src/freertos.c:482:6:HAL_UARTEx_RxEventCallback	2
+../Core/Src/freertos.c:496:6:sendStatusData	6

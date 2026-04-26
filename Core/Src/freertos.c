@@ -497,10 +497,17 @@ void sendStatusData(void) {
     uint8_t statusBuf[6];
     uint16_t bits = 0;
 
-    if (currentState != NORMAL_MODE) bits |= (1 << 0);
-    if (currentState == FALLING || currentState == APOGEE_DETECTED) bits |= (1 << 4);
-    if (currentState == FALLING) bits |= (1 << 5);
-    if (irtifa < 500.0f && currentState == FALLING) bits |= (1 << 6);
+    if (currentState != NORMAL_MODE) bits |= (1 << 0); // Bit 0: Kalkış
+
+    if (currentState == FALLING || currentState == APOGEE_DETECTED) {
+        bits |= (1 << 4); // Bit 4: Alçalmaya başladı
+        bits |= (1 << 5); // Bit 5: Sürüklenme paraşütü emri
+    }
+
+    if (irtifa < 500.0f && currentState == FALLING) {
+        bits |= (1 << 6); // Bit 6: Belirlenen irtifanın altına indi (500m)
+        bits |= (1 << 7); // Bit 7: Ana paraşüt emri
+    }
 
     statusBuf[0] = 0xAA;
     statusBuf[1] = bits & 0xFF;
