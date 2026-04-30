@@ -159,9 +159,9 @@ currentState= ON_FLIGHT;
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
-  while (MPU6050_Init(&hi2c1)==1) {
+  //while (MPU6050_Init(&hi2c1)==1) {
     //eğer sensör başlatılamazsa burada sonsuza kadar bekleyeceğiz
-  }
+  //}
 
 
   HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t*)&incomingData, 64);
